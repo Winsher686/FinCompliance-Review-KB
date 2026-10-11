@@ -1,0 +1,8 @@
+# 开发依赖（运行项目不需要，仅用于开发/测试）
+# 安装：pip install -r knowledge/requirements-dev.txt
+
+-r requirements.txt
+
+pytest>=8.0
+ruff>=0.6.9
+pre-commit>=3.7

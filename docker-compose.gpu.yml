@@ -1,0 +1,32 @@
+# ============================================================
+# GPU 叠加清单（可选）
+#
+#   有 NVIDIA 容器运行时（nvidia-container-toolkit）时使用：
+#     docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+#   没有 GPU 的机器不要加这个文件：应用会用 CPU 跑 BGE-M3 / Reranker，
+#   功能完整但推理慢一个量级（离线降级路径同样是全绿的）。
+#
+#   宿主机前置条件：
+#     1. 已装 NVIDIA 驱动（`nvidia-smi` 可用）
+#     2. 已装 nvidia-container-toolkit 并 `sudo systemctl restart docker`
+#     3. `docker run --rm --gpus all nvidia/cuda:11.8.0-base-ubuntu22.04 nvidia-smi` 能出显卡信息
+# ============================================================
+
+# 三个应用服务共用同一个 GPU 预留（锚点不能跨文件继承，所以在本文件内重新定义）
+x-gpu-reservation: &gpu-reservation
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: 1            # 单卡足够；多卡可改成 count: all 并配合 CUDA_VISIBLE_DEVICES
+            capabilities: [gpu]
+
+services:
+  app-import:
+    <<: *gpu-reservation
+  app-query:
+    <<: *gpu-reservation
+  app-review:
+    <<: *gpu-reservation

@@ -1,0 +1,254 @@
+# ============================================================
+# Docker Compose：一键起「4 个依赖服务 + 3 个应用服务」
+#
+#   docker compose up -d --build        # 起全栈（首次构建镜像较久，约 10GB 依赖）
+#   docker compose ps                   # 看健康状态
+#   docker compose logs -f app-review   # 跟踪审查服务日志
+#   docker compose down                 # 停服务（保留数据）
+#   docker compose down -v              # 连数据卷一起删
+#
+# 服务分工：
+#   etcd / minio            → Milvus 的元数据与对象存储后端
+#   milvus                  → 向量库（稠密 + 稀疏向量）
+#   neo4j                   → 知识图谱（实体 / 关系 / 多跳路径）
+#   mongo                   → 多轮会话历史
+#   app-import  :8000       → 文档导入建图
+#   app-query   :8001       → 知识库问答
+#   app-review  :8002       → 合规审查（含 HITL 人工复核）
+#
+# 说明：
+#   - 本文件**不写 GPU 预留**，因此没有 GPU 的机器也能 `docker compose up` 起来（torch 回落 CPU）；
+#     有 NVIDIA 容器运行时（nvidia-container-toolkit）时叠加 GPU 清单即可：
+#       docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#   - 密钥一律走 `knowledge/.env`（缺失时用下面的默认值启动，属演示配置，生产必须改）。
+# ============================================================
+
+name: ecommerce-compliance-kb
+
+# ---------------- 应用服务的公共配置（避免 3 份重复） ----------------
+x-app-base: &app-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: ecommerce-compliance-kb:latest
+  restart: unless-stopped
+  # 密钥与模型配置从 knowledge/.env 读取；文件不存在时不报错（用 environment 里的默认值）
+  env_file:
+    - path: knowledge/.env
+      required: false
+  # 注意：这里覆盖的是**容器内网地址**——.env 里通常写的是 127.0.0.1（本机跑的场景），
+  # 容器内必须改成 compose 的服务名，否则会连到容器自己的 localhost 上。
+  environment:
+    MILVUS_URL: http://milvus:19530
+    NEO4J_URI: bolt://neo4j:7687
+    NEO4J_USERNAME: neo4j
+    NEO4J_PASSWORD: ${NEO4J_PASSWORD:-neo4j_password}
+    NEO4J_DATABASE: neo4j
+    MONGO_URL: mongodb://mongo:27017
+    MONGO_DB_NAME: ${MONGO_DB_NAME:-ecommerce_kb}
+    MINIO_ENDPOINT: minio:9000
+    MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+    MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-knowledge-docs}
+    MINIO_SECURE: "0"
+  volumes:
+    # 上传件 / 解析中间产物：容器重建不丢
+    - app_temp_data:/app/knowledge/processor/import_process/temp_data
+  networks:
+    - kb-net
+
+services:
+  # ==================== 依赖服务 ====================
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.16
+    container_name: kb-etcd
+    restart: unless-stopped
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - etcd_data:/etcd
+    networks:
+      - kb-net
+
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    container_name: kb-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: minio server /minio_data --console-address ":9001"
+    ports:
+      - "9000:9000"    # S3 API（应用使用）
+      - "9001:9001"    # 控制台（浏览器使用）
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - minio_data:/minio_data
+    networks:
+      - kb-net
+
+  milvus:
+    image: milvusdb/milvus:v2.4.15
+    container_name: kb-milvus
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "19530:19530"   # gRPC（应用使用）
+      - "9091:9091"     # 指标 / 健康检查
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    volumes:
+      - milvus_data:/var/lib/milvus
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - kb-net
+
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: kb-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-neo4j_password}
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 2G
+      NEO4J_server_memory_pagecache_size: 512m
+    ports:
+      - "7474:7474"     # Neo4j Browser
+      - "7687:7687"     # Bolt（应用使用）
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p ${NEO4J_PASSWORD:-neo4j_password} 'RETURN 1' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 40s
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    networks:
+      - kb-net
+
+  mongo:
+    image: mongo:7.0
+    container_name: kb-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - kb-net
+
+  # ==================== 应用服务 ====================
+
+  app-import:
+    <<: *app-base
+    container_name: kb-app-import
+    command: ["uvicorn", "knowledge.processor.import_process.api.import_router:create_app",
+              "--factory", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      milvus:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  app-query:
+    <<: *app-base
+    container_name: kb-app-query
+    command: ["uvicorn", "knowledge.processor.query_process.api.query_router:create_app",
+              "--factory", "--host", "0.0.0.0", "--port", "8001"]
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      milvus:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+
+  app-review:
+    <<: *app-base
+    container_name: kb-app-review
+    command: ["uvicorn", "knowledge.processor.review_process.api.review_router:create_app",
+              "--factory", "--host", "0.0.0.0", "--port", "8002"]
+    ports:
+      - "8002:8002"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8002/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      milvus:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+volumes:
+  etcd_data:
+  minio_data:
+  milvus_data:
+  neo4j_data:
+  neo4j_logs:
+  mongo_data:
+  app_temp_data:
+
+networks:
+  kb-net:
+    driver: bridge

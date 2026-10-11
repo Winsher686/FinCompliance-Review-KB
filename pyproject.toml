@@ -1,0 +1,22 @@
+# 工程配置：只放工具链配置，不改变项目启动方式
+# （三个服务仍通过 start_import_8000.bat / start_query_8001.bat / start_review_8002.bat 启动）
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = ["knowledge/data", "docs"]
+
+[tool.ruff.lint]
+# 规则集刻意保持「最小且当前全绿」：只拦新增的真问题
+# （语法错误 E9 / 无效比较 F63 / 未定义名与非法转义 F7/F82 / 弃用警告 W6），
+# 避免既有历史问题让门禁一上来就红。后续可随代码清理逐步放开。
+select = ["E9", "F63", "F7", "F82", "W6"]
+
+[tool.ruff.format]
+# 不做大规模引号改写，避免无关 diff
+quote-style = "preserve"
+
+[tool.pytest.ini_options]
+testpaths = ["knowledge/test"]
+# 无需手动设置 PYTHONPATH 即可在项目根运行 pytest
+pythonpath = ["."]

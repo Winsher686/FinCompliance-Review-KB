@@ -1,0 +1,45 @@
+# Docker 构建上下文排除清单
+# 目的：镜像里只保留「跑得起来需要的东西」，同时缩短 build context 传输时间。
+
+# ---- 版本控制 / CI ----
+.git/
+.gitignore
+.github/
+
+# ---- 虚拟环境（镜像内用 /opt/venv）----
+.venv/
+venv/
+env/
+knowledge/.venv/
+**/site-packages/
+
+# ---- Python 缓存 ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ---- 密钥（绝不进镜像层）----
+.env
+.env.local
+.env.*.local
+knowledge/.env
+knowledge/.env.local
+
+# ---- 运行期产物 ----
+knowledge/processor/import_process/temp_data/
+knowledge/data/observability/
+*.log
+logs/
+
+# ---- 文档与静态大件（运行期用不到）----
+# 只排除 docs/ 下的流程图 PDF；knowledge/data 下的示例文档要保留（导入演示要用）
+docs/*.pdf
+
+# ---- 其他 ----
+.node_modules/
+.workbuddy/
+.DS_Store
+Thumbs.db

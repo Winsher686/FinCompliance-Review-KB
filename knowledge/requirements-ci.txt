@@ -1,0 +1,32 @@
+# CI / 快速验证用的**最小依赖集**
+#
+# 为什么单独一份：`requirements.txt` 里是 torch(cu118) + sentence-transformers + mineru[all]，
+# 装一次几个 GB、在 CI 上要十几分钟，而**离线测试套件根本不需要它们**——
+# 依赖 Milvus / BGE / Neo4j / LLM 的用例会自动 skip，LLM 相关能力走模板兜底。
+#
+# 本文件足以让以下命令全绿：
+#   pytest knowledge/test/compliance -q
+#   python knowledge/eval/run_eval.py
+#   python knowledge/eval/bench_search_concurrency.py
+#
+# 完整功能（真实检索 / 建图 / LLM）仍需 `pip install -r knowledge/requirements.txt`。
+
+# 测试与静态检查
+pytest>=8.0
+ruff>=0.6.9
+
+# 三个服务的 Web 层
+fastapi>=0.110
+uvicorn>=0.27
+httpx>=0.27
+
+# 审查流程的图编排（HITL interrupt / 恢复 依赖它）
+langgraph>=0.2
+langchain-core>=0.3
+
+# 其余被代码直接 import 的轻量依赖
+pydantic>=2.6
+python-dotenv>=1.0
+
+# 部署配置校验（测试里解析 docker-compose.yml / .github/workflows/*.yml）
+pyyaml>=6.0

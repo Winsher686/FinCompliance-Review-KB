@@ -1,0 +1,21 @@
+# 提交前自动检查（可选）：执行 `pre-commit install` 后生效
+# 只做「拦新增问题」的轻量检查，不阻断既有代码
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      # 只跑 pyproject.toml 中 select 的最小规则集
+      - id: ruff
+        name: ruff (lint)
+        args: ["--fix"]
+      - id: ruff-format
+        name: ruff (format)
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: trailing-whitespace

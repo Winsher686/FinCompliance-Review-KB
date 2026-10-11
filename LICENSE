@@ -1,0 +1,33 @@
+MIT License
+
+Copyright (c) 2026 Winsher686 (电商合规审查改造部分)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------
+来源与致谢（Provenance）
+
+本项目在架构设计阶段参考了开源项目 shopkeeper_brain（GitHub: 2019hzk/shopkeeper_brain）
+所采用的「LangGraph + 多路混合检索 + 知识图谱」技术方案，并在此基础上做了
+面向电商合规审查的重新设计与实现。
+
+说明：截至目前，上游仓库未声明任何开源许可证（无 LICENSE 文件）。
+本 LICENSE 仅覆盖本仓库自身新增与改写的代码；如需公开分发本项目，
+建议先行确认上游代码的授权情况，或确保未再包含上游受版权保护的代码/文档。
+--------------------------------------------------------------------------

@@ -1,0 +1,20 @@
+# 统一换行符策略：仓库内一律 LF，避免跨平台协作时整文件 diff
+* text=auto eol=lf
+
+# Windows 批处理脚本必须保持 CRLF，否则 cmd.exe 解析异常
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制文件不做任何换行转换（防止损坏）
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.pyc binary

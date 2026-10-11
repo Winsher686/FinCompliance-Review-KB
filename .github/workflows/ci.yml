@@ -1,0 +1,124 @@
+# ============================================================
+# CI：push / PR 自动跑「静态检查 + 离线测试 + 评测指标 + 并发基准 + 容器配置校验」
+#
+# 设计要点：
+#   1. 测试 job 用 knowledge/requirements-ci.txt（最小依赖集），不装 torch/mineru，
+#      整套跑完 2 分钟内；真实依赖的缺失由「用例自动 skip」兜住，而不是让 CI 变红。
+#   2. GPU 相关的端到端冒烟放在 `gpu-smoke`，默认跳过——GitHub 托管 runner 没有 GPU，
+#      也没有 nvidia-container-toolkit；要跑需自备带 GPU 的 self-hosted runner。
+#   3. 评测与基准都进 CI：并发改造、指标口径、评测集分数一旦回退，PR 就会被拦下。
+# ============================================================
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint（ruff）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 安装 ruff
+        run: python -m pip install "ruff>=0.6.9"
+      - name: 静态检查
+        run: ruff check .
+
+  test:
+    name: Test（Python ${{ matrix.python-version }}）
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: knowledge/requirements-ci.txt
+      - name: 安装最小依赖集
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r knowledge/requirements-ci.txt
+      - name: 离线测试套件
+        run: pytest knowledge/test/compliance -q
+      - name: 评测指标（离线可复现，含确定性断言）
+        run: python knowledge/eval/run_eval.py --json eval_report.json
+      - name: 检索并发 / Neo4j 往返基准
+        run: python knowledge/eval/bench_search_concurrency.py --repeat 3
+      - name: 上传评测结果
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report-py${{ matrix.python-version }}
+          path: eval_report.json
+          if-no-files-found: error
+
+  docker:
+    name: Docker / Compose 校验
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 校验 compose 配置（基础 + GPU 叠加）
+        run: |
+          docker compose config -q
+          docker compose -f docker-compose.yml -f docker-compose.gpu.yml config -q
+          echo "compose 配置合法"
+      - name: 校验 Dockerfile（静态检查，不拉取镜像）
+        run: docker buildx build --check .
+      - name: 完整构建镜像（重量级，需在仓库 Variables 里把 DOCKER_FULL_BUILD 设为 true）
+        if: vars.DOCKER_FULL_BUILD == 'true'
+        run: docker build -t ecommerce-compliance-kb:ci .
+
+  gpu-smoke:
+    name: GPU 端到端冒烟（自托管 runner）
+    # 默认跳过。启用方式：
+    #   ① 注册带 GPU 的 self-hosted runner，标签为 self-hosted,gpu
+    #   ② 仓库 Settings → Variables 增加 ENABLE_GPU_RUNNER=true
+    if: vars.ENABLE_GPU_RUNNER == 'true'
+    runs-on: [self-hosted, gpu]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: 起全栈（GPU）
+        run: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+      - name: 等待应用就绪
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8002/health >/dev/null 2>&1; then
+              echo "review 服务已就绪"; exit 0
+            fi
+            sleep 10
+          done
+          echo "等待超时，输出 app-review 日志："
+          docker compose logs --tail 200 app-review
+          exit 1
+      - name: 冒烟：三服务健康检查 + /docs + 一次审查
+        run: |
+          set -e
+          for port in 8000 8001 8002; do
+            echo -n ":$port/health -> "
+            curl -fsS "http://127.0.0.1:$port/health"; echo
+          done
+          curl -fsS -o /dev/null -w "review /docs -> %{http_code}\n" http://127.0.0.1:8002/docs
+          curl -fsS -X POST http://127.0.0.1:8002/review \
+            -H 'Content-Type: application/json' \
+            -d '{"company":"广州XX贸易有限公司","review_type":"product_compliance","question":"该商品标题使用「最安全」，且店铺未取得食品经营许可证，是否合规？","is_stream":false}' \
+            | head -c 800
+          echo
+      - name: 清理
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.gpu.yml down -v

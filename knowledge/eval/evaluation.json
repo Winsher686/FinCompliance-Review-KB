@@ -1,0 +1,92 @@
+{
+  "dataset": "ecommerce-compliance-review",
+  "version": "3.0",
+  "description": "电商商品/商家合规审查评测集。每条样本给定审查主体（商家/店铺）、审查类型、问题、已装配的图谱关系/路径与经营指标，用于验证：合规规则命中、风险等级汇总、HITL 触发与意图识别。含正样本（应命中）与负样本（不应命中，用于度量误报），样本可离线运行（不依赖 Milvus/Neo4j/LLM）。",
+  "qa_file": "qa_pairs.jsonl",
+  "metrics": [
+    "intent_accuracy",
+    "rule_hit_f1",
+    "risk_level_accuracy",
+    "hitl_accuracy"
+  ],
+  "date_tokens": {
+    "说明": "日期字段支持相对 token，避免评测集随时间腐烂（rg '@' qa_pairs.jsonl 可见全部用法）",
+    "支持": [
+      "@today",
+      "@-30d",
+      "@+365d",
+      "@-2y"
+    ],
+    "解析": "knowledge/eval/dataset.py::resolve_dates（读取时落到绝对日期）"
+  },
+  "total": 55,
+  "by_review_type": {
+    "banned_word": 8,
+    "qualification": 8,
+    "violation": 8,
+    "supply_chain": 7,
+    "price_category": 7,
+    "brand_authorization": 6,
+    "product_compliance": 5,
+    "general": 4,
+    "report": 2
+  },
+  "by_intent": {
+    "compliance": 32,
+    "fact": 9,
+    "path": 12,
+    "report": 2
+  },
+  "expected_rules": {
+    "R1": 9,
+    "R2": 8,
+    "R3": 7,
+    "R4": 4,
+    "R5": 7,
+    "R6": 5
+  },
+  "expected_risk_levels": {
+    "高": 15,
+    "无": 21,
+    "中": 15,
+    "低": 4
+  },
+  "hitl_expectation": {
+    "trigger_when": "风险等级属于 HITL_RISK_LEVELS（默认 高）或审查类型属于 HITL_REVIEW_TYPES（默认 report,violation,product_compliance）",
+    "expected_hitl_ids": [
+      "qa-001",
+      "qa-002",
+      "qa-003",
+      "qa-004",
+      "qa-005",
+      "qa-008",
+      "qa-017",
+      "qa-018",
+      "qa-019",
+      "qa-020",
+      "qa-021",
+      "qa-022",
+      "qa-023",
+      "qa-024",
+      "qa-045",
+      "qa-046",
+      "qa-047",
+      "qa-048",
+      "qa-049",
+      "qa-053",
+      "qa-054"
+    ]
+  },
+  "expected_scores": {
+    "intent_accuracy_offline": 0.6909,
+    "rule_hit_f1": 1.0,
+    "risk_level_accuracy": 1.0,
+    "hitl_accuracy": 1.0
+  },
+  "usage": {
+    "run_offline": "python knowledge/eval/run_eval.py",
+    "run_with_judge": "python knowledge/eval/run_eval.py --judge",
+    "run_tests": "pytest knowledge/test/compliance/test_eval_dataset.py -q",
+    "note": "规则命中/风险等级/HITL 为确定性结论，离线严格校验（当前 100%）；意图识别在线由 LLM 决定，离线仅有关键词兜底，其准确率作为参考值如实报出（低分即说明哪些意图必须依赖 LLM）。"
+  }
+}
